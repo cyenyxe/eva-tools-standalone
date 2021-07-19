@@ -55,11 +55,11 @@ parameters.chunkSize=1000
 
     def get_job_information(self, assembly, taxid):
         query = (
-            'SELECT source, scientific_name, target_assembly_accession, progress_status, SUM(number_of_study), '
-            'SUM(number_submitted_variants) '
-            'FROM remapping_progress '
-            f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}' "
-            'GROUP BY source, assembly_accession, scientific_name, target_assembly_accession, progress_status'
+            'SELECT source, scientific_name, assembly_accession, remapping_status, SUM(num_studies), '
+            'SUM(num_ss_ids) '
+            'FROM eva_progress_tracker.remapping_tracker '
+            f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}' "
+            'GROUP BY source, origin_assembly_accession, scientific_name, assembly_accession, remapping_status'
         )
         source_set = set()
         progress_set = set()
@@ -83,7 +83,7 @@ parameters.chunkSize=1000
         return sources, scientific_name, target_assembly, progress_status, n_study, n_variants
 
     def list_assemblies_to_process(self):
-        query = 'SELECT DISTINCT assembly_accession, taxid FROM remapping_progress'
+        query = 'SELECT DISTINCT origin_assembly_accession, taxonomy FROM eva_progress_tracker.remapping_tracker'
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             for assembly, taxid in get_all_results_for_query(pg_conn, query):
                 sources, scientific_name, target_assembly, progress_status, n_study, n_variants = \
@@ -91,53 +91,53 @@ parameters.chunkSize=1000
                 print('\t'.join(str(e) for e in [sources, scientific_name, assembly, taxid, target_assembly, progress_status, n_study, n_variants]))
 
     def set_status_start(self, assembly, taxid):
-        query = ('UPDATE remapping_progress '
-                 f"SET progress_status='Started', start_time = '{datetime.now().isoformat()}' "
-                 f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}'")
+        query = ('UPDATE eva_progress_tracker.remapping_tracker '
+                 f"SET remapping_status='Started', remapping_start = '{datetime.now().isoformat()}' "
+                 f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}'")
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             execute_query(pg_conn, query)
 
     def set_status_end(self, assembly, taxid):
-        query = ('UPDATE remapping_progress '
-                 f"SET progress_status='Completed', completion_time = '{datetime.now().isoformat()}' "
-                 f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}'")
+        query = ('UPDATE eva_progress_tracker.remapping_tracker '
+                 f"SET remapping_status='Completed', remapping_end = '{datetime.now().isoformat()}' "
+                 f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}'")
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             execute_query(pg_conn, query)
 
     def set_status_failed(self, assembly, taxid):
-        query = ('UPDATE remapping_progress '
-                 f"SET progress_status = 'Failed' "
-                 f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}'")
+        query = ('UPDATE eva_progress_tracker.remapping_tracker '
+                 f"SET remapping_status = 'Failed' "
+                 f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}'")
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             execute_query(pg_conn, query)
 
     def set_counts(self, assembly, taxid, source, nb_variant_extracted=None, nb_variant_remapped=None,
                    nb_variant_ingested=None):
         set_statements = []
-        query = (f"SELECT * FROM remapping_progress "
-                 f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}' AND source='{source}'")
+        query = (f"SELECT * FROM eva_progress_tracker.remapping_tracker "
+                 f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}' AND source='{source}'")
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             # Check that this row exists
             results = get_all_results_for_query(pg_conn, query)
         if results:
             if nb_variant_extracted is not None:
-                set_statements.append(f"nb_variant_extracted = {nb_variant_extracted}")
+                set_statements.append(f"num_ss_extracted = {nb_variant_extracted}")
             if nb_variant_remapped is not None:
-                set_statements.append(f"nb_variant_remapped = {nb_variant_remapped}")
+                set_statements.append(f"num_ss_remapped = {nb_variant_remapped}")
             if nb_variant_ingested is not None:
-                set_statements.append(f"nb_variant_ingested = {nb_variant_ingested}")
+                set_statements.append(f"num_ss_ingested = {nb_variant_ingested}")
 
         if set_statements:
-            query = ('UPDATE remapping_progress '
+            query = ('UPDATE eva_progress_tracker.remapping_tracker '
                      'SET ' + ', '.join(set_statements) + ' '
-                     f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}' AND source='{source}'")
+                     f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}' AND source='{source}'")
             with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
                 execute_query(pg_conn, query)
 
     def set_version(self, assembly, taxid, remapping_version=1):
-        query = ('UPDATE remapping_progress '
+        query = ('UPDATE eva_progress_tracker.remapping_tracker '
                  f"SET remapping_version='{remapping_version}' "
-                 f"WHERE assembly_accession='{assembly}' AND taxid='{taxid}'")
+                 f"WHERE origin_assembly_accession='{assembly}' AND taxonomy='{taxid}'")
 
         with get_metadata_connection_handle(cfg['maven']['environment'], cfg['maven']['settings_file']) as pg_conn:
             execute_query(pg_conn, query)

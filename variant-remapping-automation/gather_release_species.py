@@ -9,11 +9,10 @@ from collections import defaultdict
 import atexit
 
 import pandas as pd
-import psycopg2
 import psycopg2.extras
 import requests
-from ebi_eva_common_pyutils.config_utils import get_pg_metadata_uri_for_eva_profile
 from ebi_eva_common_pyutils.logger import logging_config
+from ebi_eva_common_pyutils.metadata_utils import get_metadata_connection_handle
 from ebi_eva_common_pyutils.pg_utils import execute_query, get_all_results_for_query
 
 logger = logging_config.get_logger(__name__)
@@ -151,8 +150,7 @@ def retrieve_current_ensembl_assemblies(taxid_or_assembly):
 
 
 def find_all_eva_studies(accession_counts, private_config_xml_file):
-    metadata_uri = get_pg_metadata_uri_for_eva_profile("development", private_config_xml_file)
-    with psycopg2.connect(metadata_uri, user="evadev") as pg_conn:
+    with get_metadata_connection_handle("development", private_config_xml_file) as pg_conn:
         query = (
             'SELECT DISTINCT a.vcf_reference_accession, pt.taxonomy_id, p.project_accession '
             'FROM project p '
@@ -215,8 +213,7 @@ def parse_accession_counts(accession_counts_file):
 
 def get_accession_counts_per_study(private_config_xml_file, source):
     accession_count = {}
-    with psycopg2.connect(get_pg_metadata_uri_for_eva_profile("development", private_config_xml_file),
-                          user="evadev") as pg_conn:
+    with get_metadata_connection_handle("development", private_config_xml_file) as pg_conn:
         query = (
             'SELECT assembly_accession, taxid, project_accession, SUM(number_submitted_variants) '
             'FROM eva_stats.submitted_variants_load_counts '
@@ -230,8 +227,7 @@ def get_accession_counts_per_study(private_config_xml_file, source):
 
 def get_accession_counts_per_assembly(private_config_xml_file, source):
     accession_count = {}
-    with psycopg2.connect(get_pg_metadata_uri_for_eva_profile("development", private_config_xml_file),
-                          user="evadev") as pg_conn:
+    with get_metadata_connection_handle("development", private_config_xml_file) as pg_conn:
         query = (
             'SELECT assembly_accession, taxid, SUM(number_submitted_variants) '
             'FROM eva_stats.submitted_variants_load_counts '
@@ -291,16 +287,15 @@ def parse_dbsnp_csv(input_file, accession_counts):
 
 
 def create_table_for_progress(private_config_xml_file):
-    with psycopg2.connect(get_pg_metadata_uri_for_eva_profile("development", private_config_xml_file),
-                          user="evadev") as metadata_connection_handle:
+    with get_metadata_connection_handle("development", private_config_xml_file) as metadata_connection_handle:
         query_create_table = (
-            'CREATE TABLE IF NOT EXISTS remapping_progress '
-            '(source TEXT, taxid INTEGER, scientific_name TEXT, assembly_accession TEXT, number_of_study INTEGER NOT NULL,'
-            'number_submitted_variants BIGINT NOT NULL, release_number INTEGER, target_assembly_accession TEXT, '
-            'report_time TIMESTAMP DEFAULT NOW(), progress_status TEXT, start_time TIMESTAMP, '
-            'completion_time TIMESTAMP, remapping_version TEXT, nb_variant_extracted INTEGER, '
-            'nb_variant_remapped INTEGER, nb_variant_ingested INTEGER, '
-            'primary key(source, taxid, assembly_accession, release_number))'
+            'CREATE TABLE IF NOT EXISTS eva_progress_tracker.remapping_tracker '
+            '(source TEXT, taxonomy INTEGER, scientific_name TEXT, origin_assembly_accession TEXT, num_studies INTEGER NOT NULL,'
+            'num_ss_ids BIGINT NOT NULL, release_version INTEGER, assembly_accession TEXT, '
+            'remapping_report_time TIMESTAMP DEFAULT NOW(), remapping_status TEXT, remapping_start TIMESTAMP, '
+            'remapping_end TIMESTAMP, remapping_version TEXT, num_ss_extracted INTEGER, '
+            'num_ss_remapped INTEGER, num_ss_ingested INTEGER, '
+            'primary key(source, taxonomy, origin_assembly_accession, release_version))'
         )
     execute_query(metadata_connection_handle, query_create_table)
 
@@ -308,13 +303,12 @@ def create_table_for_progress(private_config_xml_file):
 def insert_remapping_progress_to_db(private_config_xml_file, dataframe):
     list_to_remap = dataframe.values.tolist()
     if len(list_to_remap) > 0:
-        with psycopg2.connect(get_pg_metadata_uri_for_eva_profile("development", private_config_xml_file),
-                              user="evadev") as metadata_connection_handle:
+        with get_metadata_connection_handle("development", private_config_xml_file) as metadata_connection_handle:
             with metadata_connection_handle.cursor() as cursor:
                 query_insert = (
-                    'INSERT INTO remapping_progress '
-                    '(source, taxid, scientific_name, assembly_accession, number_of_study, '
-                    'number_submitted_variants, target_assembly_accession, release_number) '
+                    'INSERT INTO eva_progress_tracker.remapping_tracker '
+                    '(source, taxonomy, scientific_name, origin_assembly_accession, num_studies, '
+                    'num_ss_ids, assembly_accession, release_version) '
                     'VALUES %s'
                 )
                 psycopg2.extras.execute_values(cursor, query_insert, list_to_remap)
@@ -357,4 +351,3 @@ if __name__ == "__main__":
     # This script was copied from EVA2406: https://github.com/EBIvariation/eva-tasks/tree/master/tasks/eva_2406
     # It should be updated before being used beyond release 3
     main()
-    pass
